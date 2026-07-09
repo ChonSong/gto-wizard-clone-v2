@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0e0e0f;
+  --color-panel: #1a1c1e;
+  --color-border: #2a2e32;
+  --color-text: #d7d7d7;
+  --color-muted: #8a8f98;
+  --color-teal: #00b894;
+  --color-green: #2ecc71;
+  --color-red: #e74c3c;
+  --color-orange: #e67e22;
+  --color-blue: #3498db;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Hand matrix cells */
+.matrix-cell {
+  transition: opacity 0.15s ease;
+}
+.matrix-cell:hover {
+  filter: brightness(1.3);
+}
+
+/* Nav link active state */
+.nav-link-active {
+  color: #00b894;
+  border-bottom: 2px solid #00b894;
+}

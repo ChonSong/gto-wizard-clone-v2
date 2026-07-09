@@ -1,0 +1,23 @@
+{
+  "name": "gto-wizard-clone-v2",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/ui-components",
+    "packages/types"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "test:e2e": "turbo test:e2e",
+    "type-check": "turbo type-check",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules .next apps/*/.next .turbo apps/*/.turbo packages/*/.turbo"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "npm@10.0.0"
+}

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gto-poker"
+version = "0.1.0"
+description = "Core poker mathematics for GTO Wizard Clone"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+numba = ["numba>=0.59.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gto_poker"]

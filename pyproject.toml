@@ -1,0 +1,21 @@
+[project]
+name = "gto-wizard-clone-v2"
+version = "0.1.0"
+description = "Open-source GTO poker training platform"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/poker-core/tests", "apps/api/tests", "apps/solver/tests"]
+pythonpath = ["packages/poker-core/src", "apps/api", "apps/solver"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gto
+      POSTGRES_PASSWORD: gto_dev
+      POSTGRES_DB: gto_wizard
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    ports:
+      - '8001:8001'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gto:gto_dev@postgres:5432/gto_wizard
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  solver:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.solver
+    ports:
+      - '50051:50051'
+    restart: unless-stopped
+
+volumes:
+  pgdata:
