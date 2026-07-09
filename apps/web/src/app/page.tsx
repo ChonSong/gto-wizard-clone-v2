@@ -31,6 +31,7 @@ export default function Home() {
           <Link
             key={f.href}
             href={f.href}
+            className="feature-card"
             style={{
               textDecoration: 'none',
               background: '#1a1c1e',
@@ -38,14 +39,6 @@ export default function Home() {
               borderRadius: 12,
               padding: 24,
               transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.transform = 'translateY(-2px)'
-              e.currentTarget.style.boxShadow = `0 4px 20px ${f.color}20`
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = 'translateY(0)'
-              e.currentTarget.style.boxShadow = 'none'
             }}
           >
             <div

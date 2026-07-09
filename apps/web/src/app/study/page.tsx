@@ -28,9 +28,13 @@ interface TreeNodeData {
 }
 
 interface RangeResponse {
-  range: HandCell[]
-  source: string
-  combos: number
+  // API returns {position, stack_depth, hands: [...], tree_node?}
+  hands?: HandCell[]
+  range?: HandCell[]  // legacy format
+  source?: string
+  combos?: number
+  position?: string
+  stack_depth?: number
   tree_node?: TreeNodeData
 }
 
@@ -76,7 +80,8 @@ export default function StudyPage() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: RangeResponse = await res.json()
-      setRangeData(data.range)
+      const hands = data.hands || data.range || []
+      setRangeData(hands)
       setTreeNode(data.tree_node || null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load range')
@@ -96,16 +101,17 @@ export default function StudyPage() {
   // --- Helpers ---
   function getCellColor(action: string, frequency: number): string {
     if (action === 'fold' || frequency === 0) return GRAY
-    const base = action.includes('all_in') || action === 'all_in' ? '#c0392b'
-      : action.includes('raise') || action === 'bet' ? ACTION_COLORS.raise
-      : action.includes('call') || action === 'check' ? ACTION_COLORS.call
+    const base = action.startsWith('all_in') || action === 'all_in' ? '#c0392b'
+      : action.startsWith('raise') || action.startsWith('bet') ? ACTION_COLORS.raise
+      : action.startsWith('call') || action === 'check' ? ACTION_COLORS.call
       : GRAY
     return base
   }
 
   function getCellOpacity(cell: HandCell): number {
     if (!actionFilter) return 1
-    return cell.action === actionFilter ? 1 : 0.08
+    // Match on prefix so hovering 'raise' highlights all 'raise_2.5bb', 'raise_3bb', etc.
+    return cell.action.startsWith(actionFilter) ? 1 : 0.08
   }
 
   function handleActionClick(actionBase: string) {
@@ -448,7 +454,7 @@ export default function StudyPage() {
 
         {/* Range source info */}
         <div style={{ marginTop: 'auto', fontSize: 11, color: '#555' }}>
-          Source: {rangeData.length > 0 ? 'gto-range-definitions' : '—'}
+          {rangeData.length} hands • Source: {'gto-range-definitions'}
         </div>
       </aside>
     </div>

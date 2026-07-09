@@ -32,3 +32,9 @@ body {
   color: #00b894;
   border-bottom: 2px solid #00b894;
 }
+
+/* Feature card hover */
+.feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 184, 148, 0.12);
+}
