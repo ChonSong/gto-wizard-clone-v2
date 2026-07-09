@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { ACTION_COLORS } from '@/lib/tokens'
+import useAggregateStats from '@/hooks/useAggregateStats'
+import { AggregateFlipStrip } from '@/components/study/AggregateFlipStrip'
 
 // --- Types ---
 interface HandCell {
@@ -57,6 +59,9 @@ export default function StudyPage() {
   const [loading, setLoading] = useState(false)
   const [selectedHand, setSelectedHand] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Aggregate stats per position
+  const { stats: aggregateStats, loading: statsLoading, error: statsError } = useAggregateStats(stackDepth)
 
   // --- Data fetching ---
   const fetchRange = useCallback(async () => {
@@ -393,6 +398,21 @@ export default function StudyPage() {
             <span style={{ width: 12, height: 12, borderRadius: 2, background: GRAY }} /> Fold
           </span>
         </div>
+
+        {/* Aggregate stats strip */}
+        {statsLoading && (
+          <div style={{ color: '#8a8f98', fontSize: 14, marginTop: 20 }}>Loading stats...</div>
+        )}
+        {statsError && (
+          <div style={{ color: '#e74c3c', fontSize: 13, marginTop: 12 }}>{statsError}</div>
+        )}
+        {!statsLoading && !statsError && (
+          <AggregateFlipStrip
+            stats={aggregateStats}
+            activePosition={activePosition}
+            onPositionClick={setActivePosition}
+          />
+        )}
       </div>
 
       {/* RIGHT PANEL — Hand details */}
