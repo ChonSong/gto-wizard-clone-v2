@@ -6,7 +6,7 @@ import useAggregateStats from '@/hooks/useAggregateStats'
 import { AggregateFlipStrip } from '@/components/study/AggregateFlipStrip'
 import { BreakdownTab } from '@/components/study/BreakdownTab'
 import { StrategyTab } from '@/components/study/StrategyTab'
-import { PostflopPanel } from '@/components/study/PostflopPanel'
+
 
 // --- Types & Interfaces ---
 interface HandCell {
@@ -751,82 +751,81 @@ export default function StudyPage() {
         {/* ===== MATRIX TAB ===== */}
         {activeTab === 'matrix' && (
           <>
-            {/* Preflop matrix */}
+            <div
+              data-testid="hand-matrix"
+              role="grid"
+              aria-label="13x13 hand matrix"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(13, 48px)',
+                gridTemplateRows: 'repeat(13, 48px)',
+                gap: 1, background: '#2a2e32', borderRadius: 8, overflow: 'hidden',
+              }}
+            >
+              {RANKS.flatMap((r1, i) =>
+                RANKS.map((r2, j) => {
+                  const isPair = i === j
+                  const isSuited = i < j
+                  const handKey = isPair ? `${r1}${r2}` : isSuited ? `${r1}${r2}s` : `${r2}${r1}o`
+                  const cell = rangeData.find(h => h.hand === handKey)
+                  const action = cell?.action || 'fold'
+                  const freq = cell?.frequency || 0
+                  const color = getCellColor(action, freq, GRAY)
+                  const opacity = getCellOpacity(cell)
+                  const isSelected = selectedHand === handKey
+
+                  return (
+                    <button
+                      key={handKey}
+                      role="gridcell"
+                      data-testid={`hand-cell-${handKey}`}
+                      aria-label={`${handKey}: ${action} ${freq > 0 ? `${(freq * 100).toFixed(0)}%` : 'fold'}`}
+                      onClick={() => setSelectedHand(prev => prev === handKey ? null : handKey)}
+                      style={{
+                        width: 48, height: 48,
+                        border: isSelected ? '2px solid #ffffff' : '1px solid transparent',
+                        borderRadius: 4, cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600,
+                        color: action === 'fold' || freq === 0 ? '#555' : '#fff', opacity,
+                        background: action !== 'fold' && freq > 0 && freq < 1
+                          ? `linear-gradient(to right, ${color} ${(freq * 100).toFixed(0)}%, ${GRAY} ${(freq * 100).toFixed(0)}%)`
+                          : action !== 'fold' && freq > 0 ? color : GRAY,
+                        transition: 'opacity 0.15s, filter 0.15s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.3)' }}
+                      onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)' }}
+                    >
+                      <span style={{ fontSize: 13 }}>{handKey}</span>
+                      {freq > 0 && freq < 1 && (
+                        <span style={{ fontSize: 10, background: 'rgba(0,0,0,0.45)', padding: '0 3px', borderRadius: 3 }}>
+                          {(freq * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </button>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Matrix legend */}
+            <div data-testid="matrix-legend" style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 12, color: '#8a8f98' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 2, background: ACTION_COLORS.raise }} /> Raise
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 2, background: ACTION_COLORS.call }} /> Call
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 2, background: '#c0392b' }} /> All-in
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 2, background: GRAY }} /> Fold
+              </span>
+            </div>
+
+            {/* Aggregate strip — only preflop */}
             {!isPostflop && (
               <>
-                <div
-                  data-testid="hand-matrix"
-                  role="grid"
-                  aria-label="13x13 hand matrix"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(13, 48px)',
-                    gridTemplateRows: 'repeat(13, 48px)',
-                    gap: 1, background: '#2a2e32', borderRadius: 8, overflow: 'hidden',
-                  }}
-                >
-                  {RANKS.flatMap((r1, i) =>
-                    RANKS.map((r2, j) => {
-                      const isPair = i === j
-                      const isSuited = i < j
-                      const handKey = isPair ? `${r1}${r2}` : isSuited ? `${r1}${r2}s` : `${r2}${r1}o`
-                      const cell = rangeData.find(h => h.hand === handKey)
-                      const action = cell?.action || 'fold'
-                      const freq = cell?.frequency || 0
-                      const color = getCellColor(action, freq, GRAY)
-                      const opacity = getCellOpacity(cell)
-                      const isSelected = selectedHand === handKey
-
-                      return (
-                        <button
-                          key={handKey}
-                          role="gridcell"
-                          data-testid={`hand-cell-${handKey}`}
-                          aria-label={`${handKey}: ${action} ${freq > 0 ? `${(freq * 100).toFixed(0)}%` : 'fold'}`}
-                          onClick={() => setSelectedHand(prev => prev === handKey ? null : handKey)}
-                          style={{
-                            width: 48, height: 48,
-                            border: isSelected ? '2px solid #ffffff' : '1px solid transparent',
-                            borderRadius: 4, cursor: 'pointer', display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600,
-                            color: action === 'fold' || freq === 0 ? '#555' : '#fff', opacity,
-                            background: action !== 'fold' && freq > 0 && freq < 1
-                              ? `linear-gradient(to right, ${color} ${(freq * 100).toFixed(0)}%, ${GRAY} ${(freq * 100).toFixed(0)}%)`
-                              : action !== 'fold' && freq > 0 ? color : GRAY,
-                            transition: 'opacity 0.15s, filter 0.15s',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.3)' }}
-                          onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)' }}
-                        >
-                          <span style={{ fontSize: 13 }}>{handKey}</span>
-                          {freq > 0 && freq < 1 && (
-                            <span style={{ fontSize: 10, background: 'rgba(0,0,0,0.45)', padding: '0 3px', borderRadius: 3 }}>
-                              {(freq * 100).toFixed(0)}%
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })
-                  )}
-                </div>
-
-                {/* Matrix legend */}
-                <div data-testid="matrix-legend" style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 12, color: '#8a8f98' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 2, background: ACTION_COLORS.raise }} /> Raise
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 2, background: ACTION_COLORS.call }} /> Call
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 2, background: '#c0392b' }} /> All-in
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 2, background: GRAY }} /> Fold
-                  </span>
-                </div>
-
-                {/* Aggregate strip */}
                 {statsLoading && <div style={{ color: '#8a8f98', fontSize: 14, marginTop: 20 }}>Loading stats...</div>}
                 {statsError && <div style={{ color: '#e74c3c', fontSize: 13, marginTop: 12 }}>{statsError}</div>}
                 {!statsLoading && !statsError && (
@@ -835,9 +834,21 @@ export default function StudyPage() {
               </>
             )}
 
-            {/* Postflop strategy panel */}
+            {/* Postflop strategy summary */}
             {isPostflop && (
-              <PostflopPanel actions={postflopActions} />
+              <div style={{ marginTop: 16, padding: 12, background: '#0e0e0f', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: '#8a8f98', marginBottom: 8 }}>Postflop Strategy Summary</div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {Array.from(new Set(rangeData.map(h => h.action))).map(action => {
+                    const count = rangeData.filter(h => h.action === action).length
+                    return (
+                      <div key={action} style={{ fontSize: 13, color: getCellColor(action, 1, GRAY), fontWeight: 600 }}>
+                        {action}: {count}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             )}
           </>
         )}
