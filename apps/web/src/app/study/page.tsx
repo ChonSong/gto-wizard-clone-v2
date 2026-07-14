@@ -220,14 +220,46 @@ export default function StudyPage() {
     }
   }, [activePosition, stackDepth])
 
+  // --- Fetch postflop range matrix ---
+  const fetchPostflopRange = useCallback(async (board: BoardCard[]) => {
+    if (board.length < 3) {
+      setRangeData([])
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const boardStr = board.map(c => c.rank + c.suit).join('')
+      const res = await fetch('/api/v1/solver/postflop-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          board: boardStr,
+          position: activePosition,
+          pot_size: 5.5,
+          stack_depth: stackDepth - 2.5,
+          iterations: 300,
+        }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setRangeData(data.hands || [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load postflop range')
+      setRangeData([])
+    } finally {
+      setLoading(false)
+    }
+  }, [activePosition, stackDepth])
+
   // Fetch on parameter changes
   useEffect(() => {
     if (isPostflop) {
-      fetchPostflopStrategy(boardCards)
+      fetchPostflopRange(boardCards)
     } else {
       fetchRange()
     }
-  }, [activePosition, stackDepth, treePath, lockedHands, boardCards, isPostflop, fetchRange, fetchPostflopStrategy])
+  }, [activePosition, stackDepth, treePath, lockedHands, boardCards, isPostflop, fetchRange, fetchPostflopRange])
 
   // Reset tree when position or stack depth changes
   useEffect(() => {

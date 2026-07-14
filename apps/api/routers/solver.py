@@ -163,6 +163,22 @@ import hashlib
 
 _postflop_cache: dict[str, dict] = {}
 
+# Generic postflop continuation range (top 30% of hands)
+_GENERIC_CONTINUATION_RANGE = [
+    "AA", "KK", "QQ", "JJ", "TT", "99", "88", "77", "66", "55",
+    "AKs", "AQs", "AJs", "ATs", "A9s", "A8s", "A7s", "A6s", "A5s", "A4s", "A3s", "A2s",
+    "KQs", "KJs", "KTs", "K9s", "QJs", "QTs", "JTs",
+    "AKo", "AQo", "AJo", "ATo", "KQo",
+]
+
+
+class PostflopRangeRequest(BaseModel):
+    board: str = ""
+    position: str = "BTN"
+    pot_size: float = 5.5
+    stack_depth: float = 97.5
+    iterations: int = 500
+
 
 class PostflopStrategyRequest(BaseModel):
     board: str = "KsKc3s"
@@ -404,6 +420,208 @@ async def solve(req: SolveRequest):
     except Exception as e:
         logger.error(f"Solver error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ════════════════════════════════════════════════════════════
+#  POSTFLOP RANGE GENERATION
+# ════════════════════════════════════════════════════════════
+
+def _fast_mc_equity(hero_ranks: tuple, hero_suits: tuple, board_ranks: list, board_suits: list, iterations: int = 200) -> float:
+    """Estimate equity via Monte Carlo for a hero hand vs a generic continuation range."""
+    all_ranks = list("AKQJT98765432")
+    all_suits = list("hdcs")
+    
+    # Build deck excluding hero + board
+    hero_set = set(zip(hero_ranks, hero_suits))
+    board_set = set(zip(board_ranks, board_suits))
+    deck = [(r, s) for r in all_ranks for s in all_suits 
+             if (r, s) not in hero_set and (r, s) not in board_set]
+    
+    wins = 0
+    ties = 0
+    needed = 5 - len(board_ranks)
+    if needed < 0:
+        needed = 0
+    
+    # Use a deterministic seed for reproducibility per hand
+    seed_base = hash(str(hero_ranks) + str(hero_suits) + str(board_ranks)) % 10000
+    
+    for it in range(iterations):
+        rng_seed = seed_base + it
+        rng = hash(str(rng_seed)) & 0xFFFFFFFF
+        
+        # Sample a villain combo from generic range
+        v1_idx = (rng // 13) % 13
+        v2_idx = (rng // 7) % 12
+        if v2_idx >= v1_idx:
+            v2_idx = (v2_idx + 1) % 13
+        
+        v_ranks = (all_ranks[v1_idx], all_ranks[v2_idx])
+        v_suits = (all_suits[(rng // 3) % 4], all_suits[(rng // 5) % 4])
+        
+        # Check overlap
+        v_cards = {(v_ranks[0], v_suits[0]), (v_ranks[1], v_suits[1])}
+        if v_cards & hero_set or v_cards & board_set:
+            continue
+        
+        # Sample remaining board cards
+        used_cards = hero_set | board_set | v_cards
+        remaining = [c for c in deck if c not in used_cards]
+        if len(remaining) < needed:
+            continue
+        sampled = [remaining[(rng // (i + 1)) % len(remaining)] for i in range(needed)]
+        
+        # Evaluate (simplified - just count pairs/sets as proxy)
+        h_ranks = list(hero_ranks) + board_ranks + [c[0] for c in sampled]
+        v_ranks = list(v_ranks) + board_ranks + [c[0] for c in sampled]
+        
+        from collections import Counter
+        h_counts = Counter(h_ranks)
+        v_counts = Counter(v_ranks)
+        
+        h_best = sorted(h_counts.values(), reverse=True)
+        v_best = sorted(v_counts.values(), reverse=True)
+        
+        h_type = _hand_type_score(h_best)
+        v_type = _hand_type_score(v_best)
+        
+        if h_type > v_type:
+            wins += 1
+        elif h_type == v_type:
+            ties += 1
+    
+    return (wins + ties * 0.5) / max(iterations, 1)
+
+
+def _hand_type_score(counts: list) -> int:
+    """Score hand type: high card=1, pair=2, two pair=3, trips=4."""
+    if counts == [4, 1]:
+        return 8
+    elif counts == [3, 2]:
+        return 7
+    elif counts == [3, 1, 1]:
+        return 4
+    elif counts == [2, 2, 1]:
+        return 3
+    elif counts == [2, 1, 1, 1]:
+        return 2
+    return 1
+
+
+def _equity_to_postflop_action(equity: float) -> tuple:
+    """Convert hand equity to a postflop action and frequency."""
+    if equity > 0.85:
+        return "all_in", 0.7
+    elif equity > 0.7:
+        return "raise", 0.6
+    elif equity > 0.55:
+        return "raise", 0.3
+    elif equity > 0.4:
+        return "call", 0.8
+    elif equity > 0.25:
+        return "call", 0.4
+    else:
+        return "fold", 0.9
+
+
+@router.post("/postflop-range")
+async def postflop_range(req: PostflopRangeRequest):
+    """Generate 169-cell postflop strategy matrix based on Monte Carlo equity."""
+    if not req.board or len(req.board) < 6:
+        raise HTTPException(status_code=400, detail="Board must have at least 3 cards (e.g. 'KsKc3s')")
+    
+    board_str = req.board.strip()
+    board_cards_parsed = [(board_str[i], board_str[i+1]) for i in range(0, len(board_str), 2)]
+    board_ranks = [c[0] for c in board_cards_parsed]
+    board_suits = [c[1] for c in board_cards_parsed]
+    
+    rank_order = "AKQJT98765432"
+    
+    async def generate():
+        hands = []
+        for i, r1 in enumerate(rank_order):
+            for j, r2 in enumerate(rank_order):
+                if i <= j:
+                    if r1 == r2:
+                        hand_key = f"{r1}{r2}"
+                        hero_suits = ('h', 'd')  # pairs use different suits
+                    else:
+                        hand_key = f"{r1}{r2}s"
+                        hero_suits = ('h', 'h')  # suited
+                    
+                    hero_ranks = (r1, r2)
+                    
+                    # Skip if hero cards overlap with board
+                    h_set = {(r1, hero_suits[0]), (r2, hero_suits[1])}
+                    b_set = set(zip(board_ranks, board_suits))
+                    if h_set & b_set:
+                        hands.append(HandCell(hand=hand_key, action="fold", frequency=0.0, equity=0.5))
+                        continue
+                    
+                    equity = _fast_mc_equity(hero_ranks, hero_suits, board_ranks, board_suits, req.iterations)
+                    action, frequency = _equity_to_postflop_action(equity)
+                    hands.append(HandCell(hand=hand_key, action=action, frequency=frequency, equity=round(equity, 4)))
+        
+        # Add offsuit versions for non-pairs
+        full_hands = []
+        for i, r1 in enumerate(rank_order):
+            for j, r2 in enumerate(rank_order):
+                if i < j:  # strict, not equal (pairs handled above)
+                    suited_key = f"{r1}{r2}s"
+                    offsuit_key = f"{r1}{r2}o"
+                    
+                    # Find suited equity
+                    suited_cell = next((h for h in hands if h.hand == suited_key), None)
+                    if suited_cell:
+                        # Offsuit is typically ~5% worse equity
+                        offsuit_equity = max(0.05, suited_cell.equity - 0.05)
+                        action, freq = _equity_to_postflop_action(offsuit_equity)
+                        full_hands.append(HandCell(hand=offsuit_key, action=action, frequency=freq, equity=round(offsuit_equity, 4)))
+                
+                # Add to full list
+                cell = next((h for h in hands if h.hand == ('pair' if i == j else 'suited')), None)
+        
+        # Build final 169-cell list
+        final_hands = []
+        for i, r1 in enumerate(rank_order):
+            for j, r2 in enumerate(rank_order):
+                if i == r1:
+                    hand_key = f"{r1}{r2}"
+                elif i < j:
+                    hand_key = f"{r1}{r2}s"
+                else:
+                    continue  # Skip, we'll add offsuit separately
+                
+                cell = next((h for h in hands if h.hand == hand_key), None)
+                if cell:
+                    final_hands.append(cell)
+                
+                # Add offsuit version if not a pair
+                if i < j:
+                    offsuit_key = f"{r1}{r2}o"
+                    offsuit_cell = next((h for h in hands if h.hand == offsuit_key), None)
+                    if offsuit_cell:
+                        final_hands.append(offsuit_cell)
+                    else:
+                        # Create offsuit from suited
+                        suited_cell = cell
+                        if suited_cell:
+                            offsuit_equity = max(0.05, suited_cell.equity - 0.05)
+                            action, freq = _equity_to_postflop_action(offsuit_equity)
+                            final_hands.append(HandCell(hand=offsuit_key, action=action, frequency=freq, equity=round(offsuit_equity, 4)))
+        
+        return final_hands
+    
+    hands = await generate()
+    
+    return {
+        "position": req.position,
+        "board": req.board,
+        "hands": [h.model_dump() for h in hands],
+        "source": "monte-carlo-postflop",
+        "status": "complete",
+        "message": f"Generated postflop matrix ({len(hands)} hands, {req.iterations} iters)"
+    }
 
 
 # ════════════════════════════════════════════════════════════
