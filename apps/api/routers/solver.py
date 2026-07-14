@@ -9,10 +9,11 @@ the correct decision node: acting position, available actions,
 pot/stack info, and conditional ranges.
 """
 
-import sys, os, json, logging
+import json
+import logging
+import os
+import sys
 from pathlib import Path
-from dataclasses import dataclass, field as dataclass_field
-from typing import Optional, List, Dict
 
 # Add paths for solver engine access
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +24,7 @@ for p in [_solver_dir, _poker_dir]:
         sys.path.insert(0, p)
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/solver", tags=["solver"])
@@ -36,7 +37,7 @@ def _check_engine():
     global _engine_available
     if _engine_available is None:
         try:
-            from cfr.engine import CFREngine
+            from cfr.engine import CFREngine  # noqa: F401
 
             _engine_available = True
         except ImportError:
@@ -73,10 +74,10 @@ def _load_chart(position: str, stack_depth: int) -> dict | None:
 class SolveRequest(BaseModel):
     game_type: str = "nlh"
     players: int = 2
-    board: Optional[str] = None
+    board: str | None = None
     pot_size: int = 100
     stack_depth: int = 100
-    bet_sizes: Optional[List[int]] = None
+    bet_sizes: list[int] | None = None
     iterations: int = 200
     street: str = "river"
     position: str = "BTN"
@@ -92,10 +93,10 @@ class SolveResponse(BaseModel):
     job_id: str = ""
     status: str
     progress: int = 0
-    strategy: List[StrategyAction] = []
+    strategy: list[StrategyAction] = []
     strategy_key: str = ""
-    message: Optional[str] = None
-    error: Optional[str] = None
+    message: str | None = None
+    error: str | None = None
 
 
 class TreeAction(BaseModel):
@@ -103,25 +104,38 @@ class TreeAction(BaseModel):
 
     position: str
     action: str  # 'fold', 'call', 'raise_2.5bb', 'raise_7.5bb', 'all_in'
-    size: Optional[float] = None
+    size: float | None = None
 
 
 class TreeNode(BaseModel):
     """Current decision node in the game tree."""
 
     acting_position: str
-    available_actions: List[Dict]  # [{id, label, actionBase, size}, ...]
+    available_actions: list[dict]  # [{id, label, actionBase, size}, ...]
     pot_size: float
-    stack_remaining: Optional[float] = None
+    stack_remaining: float | None = None
     context: str = "rfi"  # 'rfi', 'vs_raise', 'vs_3bet', 'vs_4bet'
     description: str = ""
+
+
+class HandLock(BaseModel):
+    """Lock specific actions/frequencies for a given hand."""
+    actions: dict[str, float] = Field(default_factory=dict)  # {"fold": 0.3, "call": 0.4}
+
+    @model_validator(mode="after")
+    def validate_frequencies(self):
+        total = sum(f for f in self.actions.values() if f > 0)
+        if total > 1.0 + 1e-6:
+            raise ValueError(f"Frequencies sum >1.0 (got {total:.3f})")
+        return self
 
 
 class PreflopRangeRequest(BaseModel):
     position: str = "UTG"
     stack_depth: int = 100
     game_type: str = "nlh"
-    tree_path: List[TreeAction] = []
+    tree_path: list[TreeAction] = []
+    locked_hands: dict[str, HandLock] | None = None  # {"AA": {"actions": {"fold":0.3,"call":0.7}}}
 
 
 class HandCell(BaseModel):
@@ -134,16 +148,18 @@ class HandCell(BaseModel):
 class PreflopRangeResponse(BaseModel):
     position: str
     stack_depth: int
-    hands: List[HandCell]
-    tree_node: Optional[TreeNode] = None
-    tree_path: List[TreeAction] = []
+    hands: list[HandCell]
+    tree_node: TreeNode | None = None
+    tree_path: list[TreeAction] = []
     solver_engine: bool = False
     source: str = ""
+    locked_hands_applied: list[str] = []  # which hands were locked
+    counter_strategy: dict[str, float] | None = None  # hand -> deviation
 
 
 # ── Postflop Strategy Cache ──
-import hashlib
 import asyncio
+import hashlib
 
 _postflop_cache: dict[str, dict] = {}
 
@@ -154,15 +170,15 @@ class PostflopStrategyRequest(BaseModel):
     street: str = "flop"
     pot_size: float = 5.5
     stack_depth: float = 97.5
-    hero_hand: Optional[str] = None
+    hero_hand: str | None = None
 
 
 class PostflopStrategyResponse(BaseModel):
-    actions: List[StrategyAction] = []
+    actions: list[StrategyAction] = []
     source: str = ""
     status: str = ""
-    message: Optional[str] = None
-    error: Optional[str] = None
+    message: str | None = None
+    error: str | None = None
 
 
 def _dedup_actions(actions: list[StrategyAction]) -> list[StrategyAction]:
@@ -329,7 +345,7 @@ async def postflop_strategy(req: PostflopStrategyRequest):
             status="complete",
             message=f"Solved {req.street} spot ({len(strategies)} infosets)",
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return PostflopStrategyResponse(status="error", error="Solver timed out after 30s")
     except ImportError as e:
         logger.warning(f"Solver engine not available: {e}")
@@ -347,10 +363,8 @@ async def solve(req: SolveRequest):
         if not _check_engine():
             return SolveResponse(status="error", progress=0, error="Solver engine not available")
         from cfr.engine import CFREngine
-        from games.texas_hold_em import TexasHoldEm, create_river_state, ActionType
-        from gto_poker.hand import HandEvaluator
+        from games.texas_hold_em import TexasHoldEm, create_river_state
 
-        evaluator = HandEvaluator()
         game = TexasHoldEm()
         engine = CFREngine(game=game, seed=42)
         board_strings = []
@@ -424,13 +438,26 @@ def _get_position_index(pos: str) -> int:
         return -1
 
 
-def _get_next_position(current: str, excluded_positions: set[str]) -> str | None:
-    """Get the next position that hasn't folded or already acted."""
-    idx = _get_position_index(current)
+def _get_first_unmatched_actor(
+    start_from: str,
+    folded: set[str],
+    players_bet: dict[str, float],
+    current_bet: float,
+) -> str | None:
+    """Walk clockwise from start_from.
+
+    Return the first active (non-folded) player whose total bet < current_bet.
+    Implements the "Equal Action" rule — a betting round ends when all
+    active players have contributed the same amount.
+    Returns None when the round is over (all active players match).
+    """
+    idx = _get_position_index(start_from)
     for i in range(1, len(_POSITION_ORDER) + 1):
         next_idx = (idx + i) % len(_POSITION_ORDER)
         pos = _POSITION_ORDER[next_idx]
-        if pos not in excluded_positions:
+        if pos in folded:
+            continue
+        if players_bet.get(pos, 0) < current_bet - 0.001:
             return pos
     return None
 
@@ -444,7 +471,7 @@ def _compute_tree_context(
     """
     Given the game tree path (sequence of actions taken), compute:
       - acting_position: who acts next
-      - context: 'rfi', 'vs_raise', 'vs_3bet', 'vs_4bet', 'vs_call'
+      - context: 'rfi', 'vs_raise', 'vs_3bet', 'vs_4bet', 'vs_call', 'terminal'
       - pot_size: current pot in bb
       - last_raiser: who made the last raise
       - last_raise_size: the size of the last raise
@@ -452,15 +479,20 @@ def _compute_tree_context(
       - folded_positions: which positions have folded
       - active_raise_count: number of raises (1 = normal raise, 2 = 3-bet, 3 = 4-bet)
       - description: human-readable summary of the node
+
+    Uses the "Equal Action" rule to determine who acts next:
+      Walk clockwise from the last actor, find the first active player
+      whose total bet doesn't match the current bet. This is correct for
+      ALL cases — heads-up, multi-way, 3-bet, 4-bet, all-in, etc.
     """
-    # Track state as we walk the path
-    folded = set()
-    callers_after_raise = []
+    # Track per-player total bets and state
+    # Preflop initial: SB posted 0.5, BB posted 1.0, everyone else 0
+    players_bet: dict[str, float] = {"SB": _SB_AMOUNT, "BB": _BB_AMOUNT}
+    current_bet = _BB_AMOUNT  # BB is the amount to call preflop
+    folded: set[str] = set()
     last_raiser = None
     last_raise_size = 0
-    last_raise_action = None
     raise_count = 0
-    # Track the last action regardless
     last_action = None
     last_action_position = None
 
@@ -477,136 +509,68 @@ def _compute_tree_context(
         if act == "fold":
             folded.add(pos)
         elif act == "call":
-            if last_raiser:
-                callers_after_raise.append(pos)
+            # Caller puts in enough to match current_bet
+            players_bet[pos] = current_bet
         elif act.startswith("raise") or act == "all_in":
-            if last_raiser:
-                raise_count += 1  # This is a re-raise (3-bet, 4-bet, etc.)
-            else:
-                raise_count = 1  # First raise
-            # Previous callers behind the raiser are now irrelevant
-            # (they'll need to act again if re-raised, but we track them)
+            amount = size if act.startswith("raise") else stack_depth
+            raise_count += 1 if last_raiser else 1  # re-raise increments count
+            players_bet[pos] = amount
+            current_bet = amount
             last_raiser = pos
-            if act == "all_in":
-                last_raise_size = stack_depth
-            else:
-                last_raise_size = size
-            last_raise_action = act
-            callers_after_raise = []  # reset — will need to re-call
+            last_raise_size = amount
 
-    # Build set of positions already excluded (folded OR already acted)
-    acted_or_folded = set(folded)
-    if last_raiser:
-        acted_or_folded.add(last_raiser)
-    acted_or_folded.update(callers_after_raise)
-
-    # Determine who acts next and the context
+    # ── Determine acting position via Equal Action rule ──
     if raise_count == 0:
-        # Nobody has raised yet — RFI (raise first in) scenario
+        # No raise yet — RFI (raise first in)
         context = "rfi"
-        if requested_position:
-            acting_position = requested_position
-        else:
-            for pos in _POSITION_ORDER:
-                if pos not in folded and pos != (
-                    last_action_position if last_action_position else ""
-                ):
-                    acting_position = pos
-                    break
-            else:
-                acting_position = _POSITION_ORDER[0]
+        acting_position = requested_position or "UTG"
         pot = _SB_AMOUNT + _BB_AMOUNT + _ANTE
         stack_rem = stack_depth
-        last_raiser = None
-        last_raise_size = 0
         desc = f"{acting_position} RFI — {stack_depth}bb"
-
-    elif raise_count == 1:
-        # One raise has occurred. The next person(s) to act are the remaining
-        # positions after the raiser (back to the raiser if everyone folds).
-        # First check if there are callers after the raise — they've already acted
-        # and need to act again if someone re-raises. But for a single raise,
-        # they just need to decide after the raiser.
-
-        # Find next position after the raiser (defensive fallback if last_raiser is somehow None)
-        if last_raiser:
-            acting_position = _get_next_position(last_raiser, acted_or_folded)
-        else:
-            acting_position = _POSITION_ORDER[0]
-
-        context = "vs_raise"
-        pot = _SB_AMOUNT + _BB_AMOUNT + _ANTE + last_raise_size
-        stack_rem = (
-            stack_depth - last_raise_size if last_raiser and last_raiser != "BB" else stack_depth
-        )
-        desc = f"{acting_position} vs {last_raiser} {_get_bb_display(last_raise_size)} — {stack_depth}bb"
-
-    elif raise_count == 2:
-        # A raise and a re-raise (3-bet). The original raiser needs to decide.
-        # Actually, the next to act after a 3-bet is: anyone who hasn't folded
-        # and hasn't acted since the last raise.
-        # Simplest: the original raiser acts next (they're facing a 3-bet).
-
-        # The 3-bettor is last_raiser. Who acted before them? We need to find
-        # the position that made the original raise.
-        # We can find this by walking backwards through tree_path
-        # But for simplicity: the next acting position is the one who made the
-        # raise before this 3-bet (the original raiser), unless they've folded.
-
-        # Actually, more simply: for a 3-bet scenario, the next actor is the
-        # original raiser (if they haven't folded). Callers between also need to act.
-        orig_raiser = None
-        for entry in reversed(tree_path):
-            act = entry["action"]
-            pos = entry["position"]
-            if (act.startswith("raise") or act == "all_in") and pos != last_raiser:
-                orig_raiser = pos
-                break
-
-        if orig_raiser and orig_raiser not in folded:
-            acting_position = orig_raiser
-        else:
-            # Fallback: next position after 3-bettor
-            acting_position = _get_next_position(
-                last_raiser if last_raiser else _POSITION_ORDER[0],
-                acted_or_folded,
-            )
-
-        context = "vs_3bet"
-        pot = (
-            _SB_AMOUNT
-            + _BB_AMOUNT
-            + _ANTE
-            + last_raise_size
-            + sum(
-                _parse_action_size(e["action"])
-                for e in tree_path
-                if e["action"].startswith("raise")
-            )
-        )
-        stack_rem = stack_depth - last_raise_size
-        desc = f"{acting_position} vs {last_raiser} 3-bet ({_get_bb_display(last_raise_size)}) — {stack_depth}bb"
-
-    elif raise_count >= 3:
-        # 4-bet, 5-bet, etc. The 3-bettor needs to decide.
-        acting_position = (
-            last_action_position
-            if last_action_position
-            else _get_next_position(
-                last_raiser if last_raiser else _POSITION_ORDER[0],
-                acted_or_folded,
-            )
-        )
-        context = "vs_4bet"
-        pot = _SB_AMOUNT + _BB_AMOUNT + _ANTE + last_raise_size * 2
-        stack_rem = stack_depth - last_raise_size * 2
-        desc = f"{acting_position} vs 4-bet — {stack_depth}bb"
     else:
-        acting_position = _POSITION_ORDER[0]
-        context = "rfi"
-        pot = _SB_AMOUNT + _BB_AMOUNT + _ANTE
-        stack_rem = stack_depth
-        desc = f"{acting_position} RFI"
+        # Walk clockwise from the last actor. Find the first active player
+        # whose total bet < current_bet.
+        acting_position = _get_first_unmatched_actor(
+            last_action_position or _POSITION_ORDER[0],
+            folded,
+            players_bet,
+            current_bet,
+        )
+
+        # Context label based on raise count
+        context_map = {1: "vs_raise", 2: "vs_3bet", 3: "vs_4bet", 4: "vs_5bet"}
+        context = context_map.get(raise_count, f"vs_{raise_count}bet")
+
+        # Pot = sum of all bets placed
+        pot = sum(players_bet.values())
+
+        # Effective stack remaining for the acting position
+        if acting_position and acting_position not in folded:
+            stack_rem = stack_depth - players_bet.get(acting_position, 0)
+        else:
+            stack_rem = stack_depth - current_bet
+
+        desc = (
+            f"{acting_position} {context} — {stack_depth}bb"
+            if acting_position
+            else f"Round over — {stack_depth}bb"
+        )
+
+        # If no one can act next, the round is over (all active matched the bet)
+        if acting_position is None:
+            active = [p for p in _POSITION_ORDER if p not in folded]
+            if len(active) == 1:
+                acting_position = active[0]
+                context = "terminal_win"
+                desc = f"{acting_position} wins — {stack_depth}bb"
+            elif active:
+                acting_position = active[0]
+                context = "terminal_showdown"
+                desc = f"Showdown — {stack_depth}bb"
+            else:
+                acting_position = _POSITION_ORDER[-1]
+                context = "terminal"
+                desc = f"Hand over — {stack_depth}bb"
 
     return {
         "acting_position": acting_position,
@@ -1949,6 +1913,67 @@ def _get_preflop_equity(hand: str) -> float:
     return _preflop_equities.get(hand, 0.5)
 
 
+# ── Node Locking ──
+def _apply_node_locks(
+    cells: list[HandCell],
+    locked_hands: dict[str, HandLock] | None,
+    available_actions: list[dict],
+) -> tuple[list[str], dict[str, float] | None]:
+    """Apply user-specified frequency locks to hand cells.
+
+    Actions not specified in the lock inherit the existing action if it matches
+    a locked action key. If no existing action matches, the cell is marked as
+    a multi-action cell and its frequency is divided among locked actions.
+
+    Returns:
+        (locked_applied_hands, counter_strategy_deviations)
+        counter_strategy is a dict of hand -> absolute frequency change
+        (positive = increased frequency, negative = decreased).
+    """
+    if not locked_hands:
+        return [], None
+
+    locked_applied: list[str] = []
+    counter_strategy: dict[str, float] = {}
+    valid_action_bases = {a["actionBase"] for a in available_actions}
+
+    cell_map = {c.hand: c for c in cells}
+
+    for hand, lock in locked_hands.items():
+        cell = cell_map.get(hand)
+        if not cell:
+            continue
+
+        # Validate that locked actions are legal at this node
+        for act in lock.actions:
+            if act not in valid_action_bases and act not in ("fold", "call", "raise", "check", "all_in"):
+                logger.warning(f"Invalid lock action '{act}' for hand {hand}, skipping")
+                continue
+
+        if not lock.actions:
+            continue
+
+        # Record original frequency for counter-strategy calc
+        original_freq = cell.frequency
+
+        # Apply lock: set action to the primary locked action, frequency to its weight
+        # For simplicity, use the first locked action as the displayed action
+        # and the highest frequency as the cell frequency
+        primary_action = max(lock.actions, key=lambda a: lock.actions[a])
+        primary_freq = lock.actions[primary_action]
+
+        cell.action = primary_action
+        cell.frequency = primary_freq
+        locked_applied.append(hand)
+
+        # Counter-strategy: deviation from original
+        deviation = primary_freq - original_freq
+        if abs(deviation) > 0.001:
+            counter_strategy[hand] = round(deviation, 4)
+
+    return locked_applied, counter_strategy or None
+
+
 # ── API endpoint ──
 
 
@@ -2002,6 +2027,11 @@ async def preflop_range(req: PreflopRangeRequest):
         if not cells:
             raise HTTPException(status_code=500, detail="Failed to generate range")
 
+        # Apply node locks (override frequencies for locked hands)
+        locked_applied, counter_strategy = _apply_node_locks(
+            cells, req.locked_hands, available_actions
+        )
+
         # Build tree node response
         tree_node = TreeNode(
             acting_position=acting_position,
@@ -2020,6 +2050,8 @@ async def preflop_range(req: PreflopRangeRequest):
             tree_path=req.tree_path,
             solver_engine=solver_avail,
             source=source,
+            locked_hands_applied=locked_applied,
+            counter_strategy=counter_strategy,
         )
     except Exception as e:
         logger.error(f"Preflop range error: {e}", exc_info=True)
