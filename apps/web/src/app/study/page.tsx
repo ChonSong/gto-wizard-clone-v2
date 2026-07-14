@@ -6,6 +6,8 @@ import useAggregateStats from '@/hooks/useAggregateStats'
 import { AggregateFlipStrip } from '@/components/study/AggregateFlipStrip'
 import { BreakdownTab } from '@/components/study/BreakdownTab'
 import { StrategyTab } from '@/components/study/StrategyTab'
+import ExportModal from '@/components/study/ExportModal'
+import AnnotationPanel from '@/components/study/AnnotationPanel'
 
 
 // --- Types & Interfaces ---
@@ -144,6 +146,9 @@ export default function StudyPage() {
   const [lockedHands, setLockedHands] = useState<Record<string, HandLock>>(() => parseLockedHandsFromURL())
   const [activeTab, setActiveTab] = useState<'matrix' | 'breakdown' | 'strategy'>('matrix')
   const [boardPickerOpen, setBoardPickerOpen] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [showAnnotationPanel, setShowAnnotationPanel] = useState(false)
+  const [selectedHandForAnnotation, setSelectedHandForAnnotation] = useState<string | null>(null)
 
   // Aggregate stats
   const { stats: aggregateStats, loading: statsLoading, error: statsError } = useAggregateStats(stackDepth)
@@ -323,7 +328,19 @@ export default function StudyPage() {
     : activePosition
 
   const displayActions = treeNode?.available_actions || []
+
   const selectedHandData = selectedHand ? rangeData.find(h => h.hand === selectedHand) : null
+
+  const getActiveSpotHash = () => {
+    const board = boardCards.map(c => c.rank + c.suit).join('')
+    const key = `${activePosition}|${stackDepth}|${board}|${treePath.map(t => t.action).join('→')}`
+    let hash = 0
+    for (let i = 0; i < key.length; i++) {
+      hash = ((hash << 5) - hash) + key.charCodeAt(i)
+      hash |= 0
+    }
+    return Math.abs(hash).toString(16).slice(0, 16)
+  }
 
   // --- Cell display logic ---
   function getCellOpacity(cell: HandCell | undefined): number {
@@ -677,6 +694,38 @@ export default function StudyPage() {
             </div>
           </section>
         )}
+        {/* Export + Annotations */}
+        <div style={{ marginTop: 'auto', display: 'flex', gap: 8, paddingTop: 16 }}>
+          <button
+            onClick={() => setShowExportModal(true)}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 6,
+              border: '1px solid #2a2e32', background: 'transparent',
+              color: '#8a8f98', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            }}
+          >
+            ⬇ Export
+          </button>
+          <button
+            onClick={() => {
+              if (selectedHand) {
+                setSelectedHandForAnnotation(selectedHand)
+                setShowAnnotationPanel(true)
+              }
+            }}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 6,
+              border: selectedHand ? '1px solid #3498db40' : '1px solid #2a2e32',
+              background: selectedHand ? '#3498db15' : 'transparent',
+              color: selectedHand ? '#3498db' : '#555',
+              cursor: selectedHand ? 'pointer' : 'not-allowed',
+              fontSize: 12, fontWeight: 600,
+            }}
+            disabled={!selectedHand}
+          >
+            📝 Annotate
+          </button>
+        </div>
       </aside>
 
       {/* ===== MAIN CONTENT ===== */}
@@ -919,6 +968,29 @@ export default function StudyPage() {
           {rangeData.length} hands • Source: preflop GTO
         </div>
       </aside>
+
+      {/* Modals */}
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        position={activePosition}
+        stackDepth={stackDepth}
+        board={boardCards.map(c => c.rank + c.suit).join('')}
+        treePath={treePath.map(t => t.label || t.action)}
+        actions={rangeData}
+      />
+      <AnnotationPanel
+        open={showAnnotationPanel}
+        onClose={() => setShowAnnotationPanel(false)}
+        spotHash={getActiveSpotHash()}
+        hand={selectedHandForAnnotation || ''}
+        board={boardCards.map(c => c.rank + c.suit).join('')}
+        position={activePosition}
+        stackDepth={stackDepth}
+        treePath={treePath.map(t => t.label || t.action)}
+        action={selectedHandData?.action || 'fold'}
+        frequency={selectedHandData?.frequency || 0}
+      />
     </div>
   )
 }

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers import equity, solver, auth, hh, strategy, quiz, analyze_leaks
 from routers import plo4_equity, plo4_ranges, omaha
-from routers import double_board, bomb_pot, spots, courses, icm
+from routers import double_board, bomb_pot, spots, courses, icm, export, annotations, suggest
 from routers.strategy_lookup import router as strategy_lookup_router
 from routers.trainer import router as trainer_router
 from routers.quiz_ws import websocket_handler
@@ -160,6 +160,9 @@ app.include_router(strategy_lookup_router)
 app.include_router(variants_router)
 app.include_router(trainer_router)
 app.include_router(study_progress_router)
+app.include_router(export.router)
+app.include_router(annotations.router)
+app.include_router(suggest.router)
 
 
 @app.get("/")

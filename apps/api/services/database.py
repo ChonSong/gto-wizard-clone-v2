@@ -77,6 +77,7 @@ async def init_db():
 
     # Import all models so their metadata gets registered
     from apps.api.models.spots import CommunitySpot, SpotComment, SpotLike
+    from apps.api.models.annotations import SpotAnnotation, AnnotationReply
     from apps.api.models.course_models import Course, Lesson, UserProgress
     from apps.api.models.hh_models import HandHistory, HandTag, HandAction
     from apps.api.models.study_progress import StudyProgress
