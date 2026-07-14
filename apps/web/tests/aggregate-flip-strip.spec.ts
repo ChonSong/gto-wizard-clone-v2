@@ -35,24 +35,19 @@ test.describe('Aggregate Flip Strip', () => {
   })
 
   test('clicking a position in the strip updates active position and matrix', async ({ page }) => {
-    // The strip should show all positions, and clicking one should update the active state
-    // Click the "HJ" chip in the aggregate strip
-    const hjChip = page.getByRole('button', { name: /^HJ\s/ })
-
     // Before clicking, UTG should be the active position (default)
-    // The sidebar position button for UTG should be visible
-    const utgSidebar = page.getByRole('button', { name: /^UTG/ })
+    // The sidebar position button for UTG should be visible (use data-testid to avoid strict mode)
+    const utgSidebar = page.getByRole('button', { name: 'UTG', exact: true })
     await expect(utgSidebar).toBeVisible()
 
     // Click HJ chip in the aggregate strip
+    const hjChip = page.getByRole('button', { name: /^HJ\s/ })
     await hjChip.click()
 
     // After clicking, HJ should become the active position
-    // The URL might update or the active indicator changes
-    // Verify the matrix is still visible (indicating data loaded for HJ)
     await expect(page.locator('button:has-text("AA")')).toBeVisible()
 
-    // The sidebar HJ button should now be visible (the position selector, not the strip chip)
+    // The sidebar HJ button should now be visible
     const hjSidebar = page.getByRole('button', { name: 'HJ', exact: true })
     await expect(hjSidebar).toBeVisible()
 
