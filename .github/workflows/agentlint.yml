@@ -1,0 +1,13 @@
+name: AgentLint
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  agentlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 0xmariowu/AgentLint@v1.1.13
+        with:
+          fail-below: 60
+          format: md
