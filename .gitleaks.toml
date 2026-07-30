@@ -1,0 +1,7 @@
+# gitleaks config for gto-wizard-clone-v2
+[allowlist]
+description = "Allow known test/non-secret values"
+regexes = [
+    "(?i)example\\.(com|org|net)",
+    "(?i)test-",
+]
