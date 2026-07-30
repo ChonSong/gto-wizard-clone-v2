@@ -1,0 +1,36 @@
+name: test-required
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check that feat commits include test changes
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          commits=$(git rev-list "$base..$head" 2>&1) || {
+            echo "::error::git rev-list failed for range $base..$head"
+            exit 1
+          }
+          [ -z "$commits" ] && echo "No feat commits to check" && exit 0
+          for sha in $commits; do
+            msg=$(git log -1 --format=%s "$sha")
+            files=$(git diff-tree --no-commit-id -r --name-only "$sha" | tr '\n' ' ')
+            case "$msg" in
+              feat:*)
+                test_files=$(echo "$files" | grep -Eo 'tests/|test[_/]|\.test\.|_test\.py' || true)
+                if [ -z "$test_files" ]; then
+                  echo "::error::Commit $sha ($msg) adds/changes no test files. Feat commits must include paired test changes."
+                  exit 1
+                fi
+                ;;
+            esac
+          done
+          echo "All feat commits have paired test changes."

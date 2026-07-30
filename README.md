@@ -50,7 +50,7 @@ docker compose up -d
 # → API on :8001, Web on :3000, PostgreSQL on :5432, Redis on :6379
 ```
 
-## Tests
+## Local test
 
 ```bash
 # Python

@@ -1,0 +1,13 @@
+# gitleaks config for gto-wizard-clone-v2
+[allowlist]
+description = "Allow known test/non-secret values"
+regexes = [
+    "(?i)^test(-|_|$)",
+]
+paths = [
+    "(?i)tests/",
+    "(?i)docs/",
+    "(?i)packages/poker-core/tests/",
+    "(?i)apps/api/tests/",
+    "(?i)apps/solver/tests/",
+]
