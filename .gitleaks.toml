@@ -2,6 +2,12 @@
 [allowlist]
 description = "Allow known test/non-secret values"
 regexes = [
-    "(?i)example\\.(com|org|net)",
-    "(?i)test-",
+    "(?i)^test(-|_|$)",
+]
+paths = [
+    "(?i)tests/",
+    "(?i)docs/",
+    "(?i)packages/poker-core/tests/",
+    "(?i)apps/api/tests/",
+    "(?i)apps/solver/tests/",
 ]
